@@ -23,7 +23,7 @@ note = [12, 14, 16, 17, 19, 21, 23,
 
 pressed_key = set()
 
-note_map, configure = None, None
+note_map, configure = None, {}
 
 configure_attr = {
     "lowest_pitch_name": {
