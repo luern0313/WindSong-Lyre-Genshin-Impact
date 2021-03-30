@@ -32,6 +32,8 @@
 
 [luern0313](https://github.com/luern0313)  
 
+感谢：[CV-souryu](https://github.com/CV-souryu)
+
 ## 联系我
 
 Bilibili: [https://space.bilibili.com/8014831](https://space.bilibili.com/8014831)  

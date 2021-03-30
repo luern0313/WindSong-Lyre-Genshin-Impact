@@ -278,6 +278,7 @@ def is_admin():
 def main():
     global note_map
     print("疯物之诗琴 by luern0313")
+    print("世界线变动率：1.0.1.7546855")
     read_configure()
     while True:
         try:
