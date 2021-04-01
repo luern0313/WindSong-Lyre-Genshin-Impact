@@ -8,6 +8,8 @@ import json
 import os
 import ctypes
 import sys
+from system_hotkey import SystemHotkey
+
 
 key = ["z", "x", "c", "v", "b", "n", "m",
        "a", "s", "d", "f", "g", "h", "j",
@@ -274,17 +276,68 @@ def is_admin():
     except Error:
         return False
 
+stop_sign = False
+file_list = None
+
+def stop_hot(self):
+    global stop_sign
+    stop_sign = True
+
+def play_hot(event, hotkey, idx):
+    global note_map
+    global file_list
+    global key
+    global note
+    idx = idx[0][0]
+
+    print("\n".join(["正在演奏  " + str(idx) + "、" + file_list[idx]]))
+    midi = mido.MidiFile("midi/" + file_list[int(idx)])
+    print_split_line()
+    tracks = midi.tracks
+    base_note = get_base_note(tracks) if configure["lowest_pitch_name"] == -1 else configure[
+        "lowest_pitch_name"]
+    note_map = {note[i] + base_note * 12: key[i] for i in range(len(note))}
+    time.sleep(0.2)
+    for msg in midi.play():
+        global stop_sign
+        if(stop_sign):
+            for prs_key in pressed_key.copy():
+                release_key(prs_key)
+            stop_sign = False
+            break
+        if msg.type == "note_on" or msg.type == "note_off":
+            note_list = get_note(msg.note)
+            for n in note_list:
+                if n in note_map:
+                    if msg.type == "note_on":
+                        if vk[note_map[n]] in pressed_key:
+                            release_key(vk[note_map[n]])
+                        press_key(vk[note_map[n]])
+                    elif msg.type == "note_off":
+                        release_key(vk[note_map[n]])
+
 
 def main():
     global note_map
     print("疯物之诗琴 by luern0313")
     print("世界线变动率：1.0.1.7546855")
+    print("\n如果要使用快捷键演奏：")
+    print("ctrl + shift + 数字键 ：开始演奏对应的曲目")
+    print("ctrl + shift + s : 停止演奏")
     read_configure()
     while True:
         try:
+            global file_list
             file_list = os.listdir("midi/")
-            print("选择要打开的文件：")
+            print("选择要打开的文件(热键对应前十个)：")
             print("\n".join([str(i) + "、" + file_list[i] for i in range(len(file_list))]))
+
+            hk = SystemHotkey(consumer=play_hot)
+            for i in range(10):
+                hk.register(('control', 'shift', str(i)), i)
+
+            hk2 = SystemHotkey()
+            hk2.register(('control', 'shift', 's'), callback = stop_hot)
 
             midi = mido.MidiFile("midi/" + file_list[int(input("请输入文件前数字序号："))])
             print_split_line()
@@ -313,3 +366,4 @@ if __name__ == "__main__":
         main()
     else:
         ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, __file__, None, 1)
+    
