@@ -2,10 +2,9 @@ import sys, os
 if hasattr(sys, 'frozen'):
     os.environ['PATH'] = sys._MEIPASS + ";" + os.environ['PATH']
 from system_hotkey import SystemHotkey
-from PyQt5.QtCore import QSize,QPoint,Qt,QRect,pyqtSignal
-from PyQt5.QtWidgets import *
+from PyQt5.QtCore import QSize,QPoint,Qt,QRect,pyqtSignal,QCoreApplication
 from PyQt5.QtGui import QKeySequence,QIcon
-from PyQt5.QtWidgets import QWidget, QVBoxLayout,QLabel,QListWidget,QApplication
+from PyQt5.QtWidgets import QWidget,QVBoxLayout,QLabel,QListWidget,QApplication,QShortcut
 import ctypes
 from 疯物之诗琴 import PlayThread,is_admin
 import time
@@ -40,15 +39,14 @@ class playWindow(QWidget):
         self.setWindowTitle("风神之诗琴")
         self.setWindowIcon(QIcon('icon.ico'))
         self.setFixedSize(QSize(360,200))
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool) 
+        self.setWindowFlags(Qt.WindowStaysOnTopHint) 
         #self.setAttribute(Qt.WA_TranslucentBackground)
         
-
         self.widgetLayout = QVBoxLayout()#创建垂直布局
         self.widgetLayout.setObjectName("widgetLayout")
         self.setLayout(self.widgetLayout)
         self.playList = QListWidget()
-        self.playList.setGeometry(QRect(0, 40, 340, 60))
+        self.playList.setGeometry(QRect(0, 50, 340, 60))
         self.playList.setMinimumSize(QSize(340, 60))
         self.playList.setBaseSize(QSize(340, 60))
         try:
@@ -58,15 +56,15 @@ class playWindow(QWidget):
             QMessageBox(QMessageBox.Warning,'警告','没有找到midi文件').exec_()
             print(e)
         
-        self.msgLabel = QLabel('双击列表选项开始或停止演奏\nEsc退出程序，Ctrl+Shift+G停止演奏')
-        self.msgLabel.setGeometry(QRect(0, 0, 360, 40))
-        self.msgLabel.setMinimumSize(QSize(360, 40))
-        self.msgLabel.setBaseSize(QSize(360, 40))
+        self.msgLabel = QLabel('双击列表选项开始或停止演奏\nEsc退出程序，Ctrl+Shift+G停止演奏\n目前一共有%d条曲目'%(len(self.playList)))
+        self.msgLabel.setGeometry(QRect(0, 0, 360, 50))
+        self.msgLabel.setMinimumSize(QSize(360, 50))
+        self.msgLabel.setBaseSize(QSize(360, 50))
         self.msgLabel.setAlignment(Qt.AlignLeft)
         self.msgLabel.setObjectName("msgLabel")
 
         self.playStatus = QLabel('请选择一首音乐开始演奏')
-        self.playStatus.setGeometry(QRect(0, 120, 360, 20))
+        self.playStatus.setGeometry(QRect(0, 130, 360, 20))
         self.playStatus.setMinimumSize(QSize(360, 20))
         self.playStatus.setBaseSize(QSize(360, 20))
         #添加控件到布局中
@@ -124,7 +122,7 @@ class playWindow(QWidget):
         except UnregisterError as e:
             QMessageBox(QMessageBox.Warning,'警告','热键注销失败').exec_()
             print(e)
-        self.close()
+        QCoreApplication.instance().quit()
         print('退出了应用！！！')
 
 def main():

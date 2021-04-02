@@ -1,2 +1,6 @@
 .vscode/**
 __pycache__/**
+build/**
+dist/**
+演奏窗口.spec
+演奏窗口.exe
