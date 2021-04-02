@@ -34,7 +34,8 @@
 
 感谢：  
 [CV-souryu](https://github.com/CV-souryu)  
-[ulitaig](https://github.com/ulitaig)
+[ulitaig](https://github.com/ulitaig)  
+[yujie1315](https://github.com/yujie1315)
 
 ## 联系我
 
