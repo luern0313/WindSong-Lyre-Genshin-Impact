@@ -32,7 +32,9 @@
 
 [luern0313](https://github.com/luern0313)  
 
-感谢：[CV-souryu](https://github.com/CV-souryu)
+感谢：  
+[CV-souryu](https://github.com/CV-souryu)  
+[ulitaig](https://github.com/ulitaig)
 
 ## 联系我
 
