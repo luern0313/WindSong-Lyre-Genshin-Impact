@@ -11,6 +11,8 @@ import sys
 from system_hotkey import SystemHotkey
 
 
+from PyQt5.QtCore import QThread,pyqtSignal
+
 key = ["z", "x", "c", "v", "b", "n", "m",
        "a", "s", "d", "f", "g", "h", "j",
        "q", "w", "e", "r", "t", "y", "u"]
@@ -248,6 +250,54 @@ class Input_I(ctypes.Union):
 class Input(ctypes.Structure):
     _fields_ = [("type", ctypes.c_ulong),
                 ("ii", Input_I)]
+
+#构建演奏子线程，用于后台开始自动演奏
+class PlayThread(QThread):
+    playSignal = pyqtSignal(str)
+    def __init__(self,parent=None):
+        super(PlayThread,self).__init__(parent)
+        self.playFlag = False
+        pass
+    #设置停止标志位，安全退出线程
+    def stopPlay(self):
+        self.playFlag = False
+        pass
+    #设置演奏的midi文件位置
+    def setFilePath(self,filePath):
+        self.filePath = filePath
+        pass
+    #子线程工作内容，改编自main()函数
+    def run(self):
+        self.playFlag = True
+        global note_map
+        read_configure()
+        midi = mido.MidiFile(self.filePath)
+        print_split_line()
+        tracks = midi.tracks
+        base_note = get_base_note(tracks) if configure["lowest_pitch_name"] == -1 else configure[
+            "lowest_pitch_name"]
+        note_map = {note[i] + base_note * 12: key[i] for i in range(len(note))}
+        time.sleep(1)
+        for msg in midi.play():
+            if self.playFlag == False:
+                self.playSignal.emit('停止演奏！')
+                print('停止演奏！')
+                break
+            if msg.type == "note_on" or msg.type == "note_off":
+                note_list = get_note(msg.note)
+                for n in note_list:
+                    if self.playFlag == False:
+                        self.playSignal.emit('停止演奏！！')
+                        print('停止演奏！！')
+                        break
+                    if n in note_map:
+                        if msg.type == "note_on":
+                            if vk[note_map[n]] in pressed_key:
+                                release_key(vk[note_map[n]])
+                            press_key(vk[note_map[n]])
+                        elif msg.type == "note_off":
+                            release_key(vk[note_map[n]])
+        pass
 
 
 def press_key(hex_key_code):
