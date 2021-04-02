@@ -14,13 +14,14 @@ class playWindow(QWidget):
     sig_keyhot = pyqtSignal(str)
     def __init__(self,parent = None):
         super(playWindow,self).__init__(parent)
-        #1. 设置演奏线程
+        #创建自动演奏线程
         self.playThread = PlayThread()
-        #2. 设置我们的自定义热键响应函数
+        #---------设置全局快捷键----------
+        #设置我们的自定义热键响应函数
         self.sig_keyhot.connect(self.MKey_pressEvent)
-        #3. 初始化两个热键
+        #初始化热键
         self.hk_stop = SystemHotkey()
-        #4. 绑定快捷键和对应的信号发送函数
+        #绑定快捷键和对应的信号发送函数
         try:
             self.hk_stop.register(('control', 'shift', 'g'), callback=lambda x: self.send_key_event("stop"))
         except InvalidKeyError as e:
@@ -29,7 +30,8 @@ class playWindow(QWidget):
         except SystemRegisterError as e:
             QMessageBox(QMessageBox.Warning,'警告','热键设置冲突').exec_()
             print(e)
-        #5.设置pyqt5的快捷键
+        
+        #5.设置pyqt5的快捷键，ESC退出工具
         QShortcut(QKeySequence("Escape"), self, self.stopTool)
         #6.设置图形界面
         self.setupUi()
@@ -71,28 +73,30 @@ class playWindow(QWidget):
         self.widgetLayout.addWidget(self.msgLabel)
         self.widgetLayout.addWidget(self.playList)
         self.widgetLayout.addWidget(self.playStatus)
-        #绑定操作
+        #绑定操作函数
         self.playList.itemClicked.connect(self.playItemClicked)
         self.playList.doubleClicked.connect(self.playMidi)
         self.playThread.playSignal.connect(self.showStopPlay)
 
+    #在界面显示选择的状态
     def playItemClicked(self,item):
         print('你选择了：' + item.text())
         self.playStatus.setText('你选择了：' + item.text())
 
-    
     #热键处理函数
     def MKey_pressEvent(self,i_str):
         print("按下的按键是%s" % (i_str,))
-        self.stopPlayThread()
+        self.stopPlayThread()#按下全局快捷键终止演奏线程
         
     #热键信号发送函数(将外部信号，转化成qt信号)
     def send_key_event(self,i_str):
         self.sig_keyhot.emit(i_str)
     
+    #启动playThread进行自动演奏
     def playMidi(self,index):
         self.stopPlayThread()
         print('开始演奏：'+self.fileList[index.row()])
+        #显示演奏的状态
         self.playStatus.setText('开始演奏：'+self.fileList[index.row()])
         self.playThread.setFilePath("midi/"+self.fileList[index.row()])
         self.playThread.start()
@@ -101,15 +105,17 @@ class playWindow(QWidget):
     def showStopPlay(self,msg):
         self.playStatus.setText(msg)
 
+    #终止演奏线程，停止自动演奏
     def stopPlayThread(self):
-        self.playStatus.setText('停止演奏')
+        self.playStatus.setText('停止演奏')#在工具界面显示状态
         self.playThread.stopPlay()
         time.sleep(0.1)
         if not self.playThread.isFinished():
                 self.playThread.terminate()
                 self.playThread.wait()
         return
-
+    
+    #工具退出函数，主要用来停止演奏线程和退出注销热键
     def stopTool(self):
         self.stopPlayThread()
         time.sleep(0.1)

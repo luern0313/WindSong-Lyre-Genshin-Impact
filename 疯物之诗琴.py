@@ -249,21 +249,22 @@ class Input(ctypes.Structure):
     _fields_ = [("type", ctypes.c_ulong),
                 ("ii", Input_I)]
 
+#构建演奏子线程，用于后台开始自动演奏
 class PlayThread(QThread):
     playSignal = pyqtSignal(str)
     def __init__(self,parent=None):
         super(PlayThread,self).__init__(parent)
         self.playFlag = False
         pass
-
+    #设置停止标志位，安全退出线程
     def stopPlay(self):
         self.playFlag = False
         pass
-
+    #设置演奏的midi文件位置
     def setFilePath(self,filePath):
         self.filePath = filePath
         pass
-
+    #子线程工作内容，改编自main()函数
     def run(self):
         self.playFlag = True
         global note_map
