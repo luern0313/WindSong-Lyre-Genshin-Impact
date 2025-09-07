@@ -348,7 +348,9 @@ class Input(ctypes.Structure):
 class PlayThread(QThread):
     """演奏线程"""
     playSignal = pyqtSignal(str)
+    progressSignal = pyqtSignal(float)  # 添加进度信号
     file_path = None
+    start_time = 0  # 添加起始时间属性
 
     def __init__(self, parent=None):
         super(PlayThread, self).__init__(parent)
@@ -360,6 +362,9 @@ class PlayThread(QThread):
 
     def set_file_path(self, file_path):
         self.file_path = file_path
+    
+    def set_start_time(self, start_time):
+        self.start_time = start_time
 
     def run(self):
         self.playFlag = True
@@ -384,11 +389,44 @@ class PlayThread(QThread):
         
         time.sleep(1)
         
-        for msg in midi.play():
+        # 如果设置了起始时间，跳过前面的消息
+        elapsed_time = 0
+        messages_to_play = []
+        skip_time = self.start_time
+        
+        for msg in midi:
+            # 累加时间
+            if elapsed_time < skip_time:
+                elapsed_time += msg.time
+                if elapsed_time >= skip_time:
+                    # 调整第一个消息的时间
+                    adjusted_msg = msg.copy()
+                    adjusted_msg.time = elapsed_time - skip_time
+                    messages_to_play.append(adjusted_msg)
+                # 跳过这个消息
+            else:
+                messages_to_play.append(msg)
+        
+        # 如果没有设置起始时间，使用所有消息
+        if self.start_time == 0:
+            messages_to_play = list(midi)
+        
+        # 记录开始播放的时间
+        play_start_time = time.time() - self.start_time
+        
+        # 播放消息
+        for msg in messages_to_play:
             if not self.playFlag:
                 self.playSignal.emit('停止演奏！')
                 print('停止演奏！')
                 break
+            
+            # 等待消息的时间
+            time.sleep(msg.time)
+            
+            # 发送当前播放进度
+            current_play_time = time.time() - play_start_time
+            self.progressSignal.emit(current_play_time)
                 
             if msg.type == "note_on" or msg.type == "note_off":
                 # 如果需要转调，先转换音符
