@@ -7,6 +7,7 @@ import time
 import json
 import os
 import sys
+import threading
 from PyQt5.QtCore import QThread, pyqtSignal
 
 # ==================== 诗琴模式 (21键，无黑键) ====================
@@ -439,46 +440,35 @@ class PlayThread(QThread):
     progressSignal = pyqtSignal(float)  # 添加进度信号
     file_path = None
     start_time = 0  # 添加起始时间属性
-    
-    # 可中断sleep的检查间隔（秒）
-    SLEEP_CHECK_INTERVAL = 0.01  # 10ms，响应更快
 
     def __init__(self, parent=None):
         super(PlayThread, self).__init__(parent)
         self.playFlag = False
+        self._stop_event = threading.Event()  # 使用Event实现可中断等待
         read_configure()
 
     def stop_play(self):
         self.playFlag = False
+        self._stop_event.set()  # 触发事件，中断等待
 
     def set_file_path(self, file_path):
         self.file_path = file_path
     
     def set_start_time(self, start_time):
         self.start_time = start_time
-    
-    def interruptible_sleep(self, duration):
-        """可中断的sleep，每隔一小段时间检查playFlag
-        
-        Args:
-            duration: 需要等待的总时长（秒）
-            
-        Returns:
-            bool: True表示完整等待完成，False表示被中断
-        """
-        if duration <= 0:
+
+    def _interruptible_sleep(self, seconds):
+        """可中断的睡眠，返回True表示正常完成，False表示被中断"""
+        if seconds <= 0:
             return self.playFlag
-        
-        elapsed = 0
-        while elapsed < duration and self.playFlag:
-            sleep_time = min(self.SLEEP_CHECK_INTERVAL, duration - elapsed)
-            time.sleep(sleep_time)
-            elapsed += sleep_time
-        
-        return self.playFlag
+        # 使用Event.wait实现可中断等待
+        # wait返回True表示事件被set（即被中断），False表示超时
+        interrupted = self._stop_event.wait(timeout=seconds)
+        return not interrupted and self.playFlag
 
     def run(self):
         self.playFlag = True
+        self._stop_event.clear()  # 重置停止事件
         global note_map
         
         midi = mido.MidiFile(self.file_path)
@@ -498,10 +488,9 @@ class PlayThread(QThread):
         # 创建C调的音符映射
         note_map = {note[i] + base_note * 12: key[i] for i in range(len(note))}
         
-        # 使用可中断的sleep等待1秒
-        if not self.interruptible_sleep(1):
+        # 使用可中断的等待
+        if not self._interruptible_sleep(1):
             self.playSignal.emit('停止演奏！')
-            print('停止演奏！')
             return
         
         # 如果设置了起始时间，跳过前面的消息
@@ -536,11 +525,12 @@ class PlayThread(QThread):
                 print('停止演奏！')
                 break
             
-            # 使用可中断的sleep等待消息的时间
-            if not self.interruptible_sleep(msg.time):
-                self.playSignal.emit('停止演奏！')
-                print('停止演奏！')
-                break
+            # 使用可中断的等待替代 time.sleep
+            if msg.time > 0:
+                if not self._interruptible_sleep(msg.time):
+                    self.playSignal.emit('停止演奏！')
+                    print('停止演奏！')
+                    break
             
             # 发送当前播放进度
             current_play_time = time.time() - play_start_time
