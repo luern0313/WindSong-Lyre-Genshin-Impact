@@ -21,11 +21,15 @@ vk_lyre = {"z": 0x2c, "x": 0x2d, "c": 0x2e, "v": 0x2f, "b": 0x30, "n": 0x31, "m"
            "q": 0x10, "w": 0x11, "e": 0x12, "r": 0x13, "t": 0x14, "y": 0x15, "u": 0x16}
 
 # 诗琴模式音符 (只有白键，C大调音阶)
-note_lyre = [12, 14, 16, 17, 19, 21, 23,   # 低音 C D E F G A B
-             24, 26, 28, 29, 31, 33, 35,   # 中音 C D E F G A B
-             36, 38, 40, 41, 43, 45, 47]   # 高音 C D E F G A B
+# 使用相对值，表示3个八度内的白键位置
+# 实际 MIDI 音符 = note_lyre[i] + base_note * 12
+note_lyre = [0, 2, 4, 5, 7, 9, 11,     # 低音八度 C D E F G A B (相对值)
+             12, 14, 16, 17, 19, 21, 23,   # 中音八度 C D E F G A B
+             24, 26, 28, 29, 31, 33, 35]   # 高音八度 C D E F G A B
 
 # ==================== 钢琴模式 (36键，有黑键) ====================
+# 实际游戏只有36键，但我们创建虚拟映射来支持更宽的音域
+# 超出36键范围的音符会自动折叠到可演奏范围
 # 白键：低音(.,/IOP[) 中音(ZXCVBNM) 高音(QWERTYU)
 # 黑键：低音(L;90-) 中音(SDGHJ) 高音(23567)
 key_piano = [
@@ -53,14 +57,19 @@ vk_piano = {
 }
 
 # 钢琴模式音符 (包含所有半音，完整的12音阶)
+# 使用相对值 0-35，代表 36 个半音
+# 实际 MIDI 音符 = note_piano[i] + base_note * 12
 note_piano = [
-    # 低音区 C3-B3 (所有12个半音)
+    # 低音区 (相对音符 0-11，12个半音)
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
+    # 中音区 (相对音符 12-23，12个半音)
     12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
-    # 中音区 C4-B4 (所有12个半音)
-    24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35,
-    # 高音区 C5-B5 (所有12个半音)
-    36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47
+    # 高音区 (相对音符 24-35，12个半音)
+    24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35
 ]
+
+# 钢琴模式的实际可演奏范围 (36键)
+PIANO_RANGE = 36     # 36键
 
 # ==================== 当前使用的映射 (默认诗琴模式) ====================
 key = key_lyre.copy()
@@ -68,7 +77,11 @@ vk = vk_lyre.copy()
 note = note_lyre.copy()
 
 pressed_key = set()
-note_map, configure = None, {}
+configure = {}
+
+# 初始化默认 note_map (诗琴模式，base_note=3，即 C4-B6)
+# 这样在 PlayThread.run() 之前也能正常使用 get_note() 函数
+note_map = {note_lyre[i] + 3 * 12: key_lyre[i] for i in range(len(note_lyre))}
 
 # 线程锁，保护共享资源的并发访问
 _pressed_key_lock = threading.Lock()
@@ -211,26 +224,49 @@ def switch_instrument_mode(mode):
     """切换乐器模式
     mode: 0 = 诗琴模式 (21键，无黑键)
           1 = 钢琴模式 (36键，有黑键)
+    
+    注意：使用原地修改 (clear + extend/update) 而不是重新赋值，
+    这样通过 'from ... import' 导入的变量也能看到更新。
+    同时更新 note_map 的默认值。
     """
-    global key, vk, note
+    global key, vk, note, note_map
     
     if mode == 0:
-        key = key_lyre.copy()
-        vk = vk_lyre.copy()
-        note = note_lyre.copy()
+        # 原地修改列表
+        key.clear()
+        key.extend(key_lyre)
+        # 原地修改字典
+        vk.clear()
+        vk.update(vk_lyre)
+        # 原地修改列表
+        note.clear()
+        note.extend(note_lyre)
+        # 更新默认 note_map (base_note=3, 即 C4-B6)
+        with _note_map_lock:
+            note_map = {note_lyre[i] + 3 * 12: key_lyre[i] for i in range(len(note_lyre))}
         print("已切换到诗琴模式 (21键，无黑键)")
     elif mode == 1:
-        key = key_piano.copy()
-        vk = vk_piano.copy()
-        note = note_piano.copy()
+        # 原地修改列表
+        key.clear()
+        key.extend(key_piano)
+        # 原地修改字典
+        vk.clear()
+        vk.update(vk_piano)
+        # 原地修改列表
+        note.clear()
+        note.extend(note_piano)
+        # 更新默认 note_map (base_note=3, 即 C3-B5, MIDI 36-71)
+        with _note_map_lock:
+            note_map = {note_piano[i] + 3 * 12: key_piano[i] for i in range(len(note_piano))}
         print("已切换到钢琴模式 (36键，有黑键)")
     
     return mode
 
 
 def is_piano_mode():
-    """检查当前是否为钢琴模式"""
-    return configure.get("instrument_mode", 0) == 1
+    """检查当前是否为钢琴模式（线程安全）"""
+    with _configure_lock:
+        return configure.get("instrument_mode", 0) == 1
 
 
 def detect_key_signature(tracks):
@@ -371,42 +407,110 @@ def set_configure():
 
 
 def get_base_note(bn_tracks):
+    """
+    智能计算最佳基础音高（base_note）
+    
+    对于36键钢琴模式，需要将MIDI音符映射到3个八度范围内。
+    这个函数会分析MIDI文件中所有音符的分布，找到能覆盖最多音符的3个八度窗口。
+    
+    返回值: base_note (1-6)
+        - base_note=1: 映射范围 C1-B3 (MIDI 12-47)
+        - base_note=2: 映射范围 C2-B4 (MIDI 24-59)
+        - base_note=3: 映射范围 C3-B5 (MIDI 36-71)  <- 标准钢琴中音区
+        - base_note=4: 映射范围 C4-B6 (MIDI 48-83)
+        - base_note=5: 映射范围 C5-B7 (MIDI 60-95)
+        - base_note=6: 映射范围 C6-B8 (MIDI 72-107)
+    """
+    # 统计每个八度的音符数量 (覆盖 C0-B8，共9个八度)
     note_count = {i: 0 for i in range(9)}
+    min_note = 127
+    max_note = 0
+    
     for bn_track in bn_tracks:
         for bn_msg in bn_track:
-            if bn_msg.type == "note_on":
-                note_count[(bn_msg.note - 24) // 12 + 1] += 1
-
-    c = [note_count[i] + note_count[i + 1] + note_count[i + 2] for i in range(len(note_count) - 2)]
-    return c.index(max(c))
+            if bn_msg.type == "note_on" and bn_msg.velocity > 0:
+                octave = (bn_msg.note - 12) // 12  # C1=12 对应 octave=0
+                if 0 <= octave < 9:
+                    note_count[octave] += 1
+                min_note = min(min_note, bn_msg.note)
+                max_note = max(max_note, bn_msg.note)
+    
+    # 打印音域信息
+    if min_note <= max_note:
+        note_names = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+        min_name = note_names[min_note % 12] + str(min_note // 12 - 1)
+        max_name = note_names[max_note % 12] + str(max_note // 12 - 1)
+        print(f"MIDI文件音域: {min_name} (MIDI {min_note}) - {max_name} (MIDI {max_note})")
+        print(f"跨越约 {(max_note - min_note) // 12 + 1} 个八度")
+    
+    # 计算每个可能的3八度窗口能覆盖多少音符
+    # 窗口起始八度: 0=C1, 1=C2, 2=C3, ...
+    window_scores = []
+    for start_octave in range(7):  # 最多到C7开始的窗口
+        score = sum(note_count[start_octave + i] for i in range(3) if start_octave + i < 9)
+        window_scores.append(score)
+    
+    # 找到最佳窗口
+    best_window = window_scores.index(max(window_scores))
+    base_note = best_window + 1  # 转换为 base_note (1-7)
+    
+    # 打印映射信息
+    start_midi = base_note * 12
+    end_midi = start_midi + 35
+    print(f"选择 base_note={base_note}，映射范围: MIDI {start_midi}-{end_midi}")
+    
+    return base_note
 
 
 def get_note(n):
-    """处理音符，包括超范围和黑键处理（线程安全）"""
+    """
+    处理音符，包括超范围和黑键处理（线程安全）
+    
+    对于36键钢琴模式：
+    - 超出范围的音符会被折叠到可演奏范围内（升/降八度）
+    - 支持完整的12音阶，无需黑键转换
+    
+    对于21键诗琴模式：
+    - 超出范围的音符会被折叠到可演奏范围内
+    - 黑键会用邻近的白键代替
+    """
     n_list = []
     
     # 获取 note_map 的快照（线程安全）
     with _note_map_lock:
+        if note_map is None:
+            return n_list
         note_map_keys = list(note_map.keys())
+    
+    if not note_map_keys:
+        return n_list
     
     # 获取配置的快照（线程安全）
     with _configure_lock:
-        below_limit = configure["below_limit"]
-        above_limit = configure["above_limit"]
+        below_limit = configure.get("below_limit", 2)
+        above_limit = configure.get("above_limit", 2)
         black_key_1 = configure.get("black_key_1", 0)
         black_key_2 = configure.get("black_key_2", 3)
         black_key_3 = configure.get("black_key_3", 3)
     
-    # 处理超出范围的音符
-    while n < note_map_keys[0] and below_limit > 0:
+    min_key = note_map_keys[0]
+    max_key = note_map_keys[-1]
+    
+    # 处理超出范围的音符 - 折叠到可演奏范围
+    while n < min_key and below_limit > 0:
         n += 12
         if below_limit == 1:
             break
 
-    while n > note_map_keys[-1] and above_limit > 0:
+    while n > max_key and above_limit > 0:
         n -= 12
         if above_limit == 1:
             break
+    
+    # 再次检查是否在范围内（below_limit=0或above_limit=0时可能仍超出范围）
+    if n < min_key or n > max_key:
+        # 音符超出范围且配置为不演奏
+        return n_list
 
     # 钢琴模式：直接支持黑键，无需转换
     if is_piano_mode():
@@ -414,21 +518,34 @@ def get_note(n):
         return n_list
     
     # 诗琴模式：处理黑键（用邻近白键代替）
-    if note_map_keys[0] <= n <= note_map_keys[6] and n not in note_map_keys:
+    # 检查音符是否需要处理（不在note_map中表示是黑键）
+    if n in note_map_keys:
+        n_list.append(n)
+        return n_list
+    
+    # 确定音符所在的八度区域
+    octave_size = len(note_map_keys) // 3  # 每个八度的键数 (21键模式下为7)
+    if octave_size <= 0:
+        octave_size = 7
+    
+    if note_map_keys[0] <= n <= note_map_keys[min(6, len(note_map_keys)-1)]:
+        # 第一个八度
         if black_key_1 == 1:
             n -= 1
         elif black_key_1 > 1:
             n += 1
             if black_key_1 == 3:
                 n_list.append(n - 2)
-    elif note_map_keys[7] <= n <= note_map_keys[13] and n not in note_map_keys:
+    elif len(note_map_keys) > 7 and note_map_keys[7] <= n <= note_map_keys[min(13, len(note_map_keys)-1)]:
+        # 第二个八度
         if black_key_2 == 1:
             n -= 1
         elif black_key_2 > 1:
             n += 1
             if black_key_2 == 3:
                 n_list.append(n - 2)
-    elif note_map_keys[14] <= n <= note_map_keys[20] and n not in note_map_keys:
+    elif len(note_map_keys) > 14 and note_map_keys[14] <= n <= note_map_keys[min(20, len(note_map_keys)-1)]:
+        # 第三个八度
         if black_key_3 == 1:
             n -= 1
         elif black_key_3 > 1:
@@ -541,9 +658,24 @@ class PlayThread(QThread):
         # 获取基础音高
         base_note = get_base_note(tracks) if lowest_pitch_name == -1 else lowest_pitch_name
         
-        # 创建C调的音符映射（线程安全写入）
+        # 创建本次播放的音符映射（局部变量，整首曲子保持不变）
+        local_note_map = {note[i] + base_note * 12: key[i] for i in range(len(note))}
+        
+        # 同时更新全局 note_map（供其他地方参考）
         with _note_map_lock:
-            note_map = {note[i] + base_note * 12: key[i] for i in range(len(note))}
+            note_map = local_note_map.copy()
+        
+        # 获取配置快照（整首曲子使用相同配置，不受中途配置变更影响）
+        with _configure_lock:
+            local_below_limit = configure.get("below_limit", 2)
+            local_above_limit = configure.get("above_limit", 2)
+        
+        # 预计算映射范围（整首曲子保持不变）
+        local_note_map_keys = sorted(local_note_map.keys())
+        local_min_key = local_note_map_keys[0]
+        local_max_key = local_note_map_keys[-1]
+        
+        print(f"本次演奏音符映射范围: MIDI {local_min_key} - {local_max_key}")
         
         # 使用可中断的等待
         if not self._interruptible_sleep(1):
@@ -575,6 +707,22 @@ class PlayThread(QThread):
         # 记录开始播放的时间
         play_start_time = time.time() - self.start_time
         
+        # 定义本地音符处理函数（使用本次播放的固定映射）
+        def process_note_local(n):
+            """处理音符，使用本次播放的固定映射"""
+            # 处理超出范围的音符 - 折叠到可演奏范围
+            while n < local_min_key and local_below_limit > 0:
+                n += 12
+                if local_below_limit == 1:
+                    break
+
+            while n > local_max_key and local_above_limit > 0:
+                n -= 12
+                if local_above_limit == 1:
+                    break
+            
+            return n
+        
         # 播放消息
         for msg in messages_to_play:
             if not self.playFlag:
@@ -599,27 +747,28 @@ class PlayThread(QThread):
                 if auto_transpose == 1 and detected_key != "C":
                     original_note = transpose_to_c(msg.note, detected_key)
                 
-                # 获取要按的键
-                note_list = get_note(original_note)
+                # 使用本地处理函数处理音符（保持整首曲子映射一致）
+                processed_note = process_note_local(original_note)
                 
-                # 获取 note_map 的当前快照（线程安全）
-                with _note_map_lock:
-                    current_note_map = note_map.copy()
+                # 检查音符是否在映射范围内
+                if processed_note not in local_note_map:
+                    continue
                 
-                for n in note_list:
-                    if not self.playFlag:
-                        self.playSignal.emit('停止演奏！！')
-                        print('停止演奏！！')
-                        break
-                    if n in current_note_map:
-                        if msg.type == "note_on":
-                            with _pressed_key_lock:
-                                key_pressed = vk[current_note_map[n]] in pressed_key
-                            if key_pressed:
-                                release_key(vk[current_note_map[n]])
-                            press_key(vk[current_note_map[n]])
-                        elif msg.type == "note_off":
-                            release_key(vk[current_note_map[n]])
+                target_key = local_note_map[processed_note]
+                
+                if not self.playFlag:
+                    self.playSignal.emit('停止演奏！！')
+                    print('停止演奏！！')
+                    break
+                    
+                if msg.type == "note_on":
+                    with _pressed_key_lock:
+                        key_pressed = vk[target_key] in pressed_key
+                    if key_pressed:
+                        release_key(vk[target_key])
+                    press_key(vk[target_key])
+                elif msg.type == "note_off":
+                    release_key(vk[target_key])
         
         # 播放结束后，确保释放所有按键
         release_all_keys()
