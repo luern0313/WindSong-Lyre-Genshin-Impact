@@ -70,6 +70,11 @@ note = note_lyre.copy()
 pressed_key = set()
 note_map, configure = None, {}
 
+# 线程锁，保护共享资源的并发访问
+_pressed_key_lock = threading.Lock()
+_note_map_lock = threading.Lock()
+_configure_lock = threading.Lock()
+
 # 调式识别相关
 KEY_SIGNATURES = {
     # 升号调
@@ -265,34 +270,38 @@ def transpose_to_c(midi_note, from_key):
 
 
 def read_configure():
+    """读取配置文件（线程安全）"""
     global configure
-    if os.path.exists("configure.json"):
-        with open("configure.json", encoding="utf-8") as file:
-            configure = json.loads(file.read())
-    else:
-        print("配置文件不存在")
-        set_configure()
-        save_configure()
+    with _configure_lock:
+        if os.path.exists("configure.json"):
+            with open("configure.json", encoding="utf-8") as file:
+                configure = json.loads(file.read())
+        else:
+            print("配置文件不存在")
+            set_configure()
+            save_configure()
 
-    # 根据配置切换乐器模式
-    instrument_mode = configure.get("instrument_mode", 0)
-    switch_instrument_mode(instrument_mode)
+        # 根据配置切换乐器模式
+        instrument_mode = configure.get("instrument_mode", 0)
+        switch_instrument_mode(instrument_mode)
 
-    print_split_line()
-    print("当前配置：")
-    for conf_key in configure.keys():
-        if conf_key in configure_attr:
-            conf = configure_attr[conf_key]
-            if conf["mode"] == "int":
-                print(conf["get_tip"] + "：" + str(configure[conf_key]))
-            elif conf["mode"] == "option":
-                print(conf["get_tip"] + "：" + conf["option"][configure[conf_key]])
-    print_split_line()
+        print_split_line()
+        print("当前配置：")
+        for conf_key in configure.keys():
+            if conf_key in configure_attr:
+                conf = configure_attr[conf_key]
+                if conf["mode"] == "int":
+                    print(conf["get_tip"] + "：" + str(configure[conf_key]))
+                elif conf["mode"] == "option":
+                    print(conf["get_tip"] + "：" + conf["option"][configure[conf_key]])
+        print_split_line()
 
 
 def save_configure():
-    with open("configure.json", "w", encoding="utf-8") as file:
-        file.write(json.dumps(configure))
+    """保存配置文件（线程安全）"""
+    with _configure_lock:
+        with open("configure.json", "w", encoding="utf-8") as file:
+            file.write(json.dumps(configure))
     print("配置文件已保存")
 
 
@@ -344,19 +353,30 @@ def get_base_note(bn_tracks):
 
 
 def get_note(n):
-    """处理音符，包括超范围和黑键处理"""
+    """处理音符，包括超范围和黑键处理（线程安全）"""
     n_list = []
-    note_map_keys = list(note_map.keys())
+    
+    # 获取 note_map 的快照（线程安全）
+    with _note_map_lock:
+        note_map_keys = list(note_map.keys())
+    
+    # 获取配置的快照（线程安全）
+    with _configure_lock:
+        below_limit = configure["below_limit"]
+        above_limit = configure["above_limit"]
+        black_key_1 = configure.get("black_key_1", 0)
+        black_key_2 = configure.get("black_key_2", 3)
+        black_key_3 = configure.get("black_key_3", 3)
     
     # 处理超出范围的音符
-    while n < note_map_keys[0] and configure["below_limit"] > 0:
+    while n < note_map_keys[0] and below_limit > 0:
         n += 12
-        if configure["below_limit"] == 1:
+        if below_limit == 1:
             break
 
-    while n > note_map_keys[-1] and configure["above_limit"] > 0:
+    while n > note_map_keys[-1] and above_limit > 0:
         n -= 12
-        if configure["above_limit"] == 1:
+        if above_limit == 1:
             break
 
     # 钢琴模式：直接支持黑键，无需转换
@@ -366,25 +386,25 @@ def get_note(n):
     
     # 诗琴模式：处理黑键（用邻近白键代替）
     if note_map_keys[0] <= n <= note_map_keys[6] and n not in note_map_keys:
-        if configure["black_key_1"] == 1:
+        if black_key_1 == 1:
             n -= 1
-        elif configure["black_key_1"] > 1:
+        elif black_key_1 > 1:
             n += 1
-            if configure["black_key_1"] == 3:
+            if black_key_1 == 3:
                 n_list.append(n - 2)
     elif note_map_keys[7] <= n <= note_map_keys[13] and n not in note_map_keys:
-        if configure["black_key_2"] == 1:
+        if black_key_2 == 1:
             n -= 1
-        elif configure["black_key_2"] > 1:
+        elif black_key_2 > 1:
             n += 1
-            if configure["black_key_2"] == 3:
+            if black_key_2 == 3:
                 n_list.append(n - 2)
     elif note_map_keys[14] <= n <= note_map_keys[20] and n not in note_map_keys:
-        if configure["black_key_3"] == 1:
+        if black_key_3 == 1:
             n -= 1
-        elif configure["black_key_3"] > 1:
+        elif black_key_3 > 1:
             n += 1
-            if configure["black_key_3"] == 3:
+            if black_key_3 == 3:
                 n_list.append(n - 2)
 
     n_list.append(n)
@@ -478,18 +498,23 @@ class PlayThread(QThread):
         print_split_line()
         tracks = midi.tracks
         
-        # 检测调式
+        # 检测调式（线程安全读取配置）
         detected_key = "C"
-        if configure.get("auto_transpose", 1) == 1:
+        with _configure_lock:
+            auto_transpose = configure.get("auto_transpose", 1)
+            lowest_pitch_name = configure["lowest_pitch_name"]
+        
+        if auto_transpose == 1:
             detected_key = detect_key_signature(tracks)
             if detected_key != "C":
                 print(f"将从{detected_key}调自动转换到C调")
         
         # 获取基础音高
-        base_note = get_base_note(tracks) if configure["lowest_pitch_name"] == -1 else configure["lowest_pitch_name"]
+        base_note = get_base_note(tracks) if lowest_pitch_name == -1 else lowest_pitch_name
         
-        # 创建C调的音符映射
-        note_map = {note[i] + base_note * 12: key[i] for i in range(len(note))}
+        # 创建C调的音符映射（线程安全写入）
+        with _note_map_lock:
+            note_map = {note[i] + base_note * 12: key[i] for i in range(len(note))}
         
         # 使用可中断的等待
         if not self._interruptible_sleep(1):
@@ -542,32 +567,40 @@ class PlayThread(QThread):
             if msg.type == "note_on" or msg.type == "note_off":
                 # 如果需要转调，先转换音符
                 original_note = msg.note
-                if configure.get("auto_transpose", 1) == 1 and detected_key != "C":
+                if auto_transpose == 1 and detected_key != "C":
                     original_note = transpose_to_c(msg.note, detected_key)
                 
                 # 获取要按的键
                 note_list = get_note(original_note)
+                
+                # 获取 note_map 的当前快照（线程安全）
+                with _note_map_lock:
+                    current_note_map = note_map.copy()
                 
                 for n in note_list:
                     if not self.playFlag:
                         self.playSignal.emit('停止演奏！！')
                         print('停止演奏！！')
                         break
-                    if n in note_map:
+                    if n in current_note_map:
                         if msg.type == "note_on":
-                            if vk[note_map[n]] in pressed_key:
-                                release_key(vk[note_map[n]])
-                            press_key(vk[note_map[n]])
+                            with _pressed_key_lock:
+                                key_pressed = vk[current_note_map[n]] in pressed_key
+                            if key_pressed:
+                                release_key(vk[current_note_map[n]])
+                            press_key(vk[current_note_map[n]])
                         elif msg.type == "note_off":
-                            release_key(vk[note_map[n]])
+                            release_key(vk[current_note_map[n]])
         
         # 播放结束后，确保释放所有按键
         release_all_keys()
 
 
 def press_key(hex_key_code):
+    """按下指定键（线程安全）"""
     global pressed_key
-    pressed_key.add(hex_key_code)
+    with _pressed_key_lock:
+        pressed_key.add(hex_key_code)
     extra = ctypes.c_ulong(0)
     ii_ = Input_I()
     ii_.ki = KeyBdInput(0, hex_key_code, 0x0008, 0, ctypes.pointer(extra))
@@ -576,8 +609,10 @@ def press_key(hex_key_code):
 
 
 def release_key(hex_key_code):
+    """释放指定键（线程安全）"""
     global pressed_key
-    pressed_key.discard(hex_key_code)
+    with _pressed_key_lock:
+        pressed_key.discard(hex_key_code)
     extra = ctypes.c_ulong(0)
     ii_ = Input_I()
     ii_.ki = KeyBdInput(0, hex_key_code, 0x0008 | 0x0002, 0, ctypes.pointer(extra))
@@ -586,13 +621,15 @@ def release_key(hex_key_code):
 
 
 def release_all_keys():
-    """释放所有当前按下的键，防止资源泄漏"""
+    """释放所有当前按下的键，防止资源泄漏（线程安全）"""
     global pressed_key
-    # 复制一份，避免在迭代时修改集合
-    keys_to_release = pressed_key.copy()
+    with _pressed_key_lock:
+        # 复制一份，避免在迭代时修改集合
+        keys_to_release = pressed_key.copy()
     for hex_key_code in keys_to_release:
         release_key(hex_key_code)
-    pressed_key.clear()
+    with _pressed_key_lock:
+        pressed_key.clear()
 
 
 def is_admin():
@@ -619,17 +656,22 @@ def main():
             print_split_line()
             tracks = midi_file.tracks
             
-            # 检测并显示调式
+            # 检测并显示调式（线程安全读取配置）
             detected_key = "C"
-            if configure.get("auto_transpose", 1) == 1:
+            with _configure_lock:
+                auto_transpose = configure.get("auto_transpose", 1)
+                lowest_pitch_name = configure["lowest_pitch_name"]
+            
+            if auto_transpose == 1:
                 detected_key = detect_key_signature(tracks)
                 if detected_key != "C":
                     print(f"检测到{detected_key}调，将自动转换到C调演奏")
                 else:
                     print("检测到C调，无需转换")
             
-            base_note = get_base_note(tracks) if configure["lowest_pitch_name"] == -1 else configure["lowest_pitch_name"]
-            note_map = {note[i] + base_note * 12: key[i] for i in range(len(note))}
+            base_note = get_base_note(tracks) if lowest_pitch_name == -1 else lowest_pitch_name
+            with _note_map_lock:
+                note_map = {note[i] + base_note * 12: key[i] for i in range(len(note))}
             
             time.sleep(1)
             
@@ -637,18 +679,22 @@ def main():
                 if msg.type == "note_on" or msg.type == "note_off":
                     # 转调处理
                     original_note = msg.note
-                    if configure.get("auto_transpose", 1) == 1 and detected_key != "C":
+                    if auto_transpose == 1 and detected_key != "C":
                         original_note = transpose_to_c(msg.note, detected_key)
                     
                     note_list = get_note(original_note)
+                    with _note_map_lock:
+                        current_note_map = note_map.copy()
                     for n in note_list:
-                        if n in note_map:
+                        if n in current_note_map:
                             if msg.type == "note_on":
-                                if vk[note_map[n]] in pressed_key:
-                                    release_key(vk[note_map[n]])
-                                press_key(vk[note_map[n]])
+                                with _pressed_key_lock:
+                                    key_pressed = vk[current_note_map[n]] in pressed_key
+                                if key_pressed:
+                                    release_key(vk[current_note_map[n]])
+                                press_key(vk[current_note_map[n]])
                             elif msg.type == "note_off":
-                                release_key(vk[note_map[n]])
+                                release_key(vk[current_note_map[n]])
                                 
         except Exception as e:
             print("错误:" + str(e))
