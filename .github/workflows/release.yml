@@ -1,0 +1,89 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # 当推送 v 开头的标签时触发，如 v1.0.0, v2.1.3
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  build:
+    runs-on: windows-latest
+    
+    steps:
+    # 1. 检出代码
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    # 2. 设置 Python 环境
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+    
+    # 3. 安装依赖
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    # 4. 使用 PyInstaller 打包
+    - name: Build executable
+      run: python -m PyInstaller --clean build_exe.spec
+    
+    # 5. 创建发布包（包含 exe 和 midi 文件夹）
+    - name: Prepare release package
+      run: |
+        mkdir release
+        copy "dist\疯物之诗琴.exe" "release\"
+        xcopy "midi" "release\midi\" /E /I /Y
+        copy "README.md" "release\" 2>nul || echo "No README.md"
+      shell: cmd
+    
+    # 6. 打包成 zip
+    - name: Create zip archive
+      run: |
+        Compress-Archive -Path "release\*" -DestinationPath "疯物之诗琴-${{ github.ref_name }}.zip"
+      shell: pwsh
+    
+    # 7. 上传构建产物（用于调试）
+    - name: Upload build artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: WindSong-Lyre-Build
+        path: release/
+        retention-days: 7
+    
+    # 8. 创建 GitHub Release 并上传文件
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+        name: 疯物之诗琴 ${{ github.ref_name }}
+        body: |
+          ## 疯物之诗琴 ${{ github.ref_name }}
+          
+          ### 📦 下载说明
+          - **疯物之诗琴-${{ github.ref_name }}.zip**: 完整发布包（包含 exe 和 midi 文件）
+          - **疯物之诗琴.exe**: 仅程序文件（需要自行准备 midi 文件夹）
+          
+          ### 🎮 使用方法
+          1. 下载 zip 文件并解压
+          2. 以管理员身份运行 `疯物之诗琴.exe`
+          3. 双击列表中的曲目开始演奏
+          
+          ### ⌨️ 快捷键
+          - `Ctrl+Shift+G`: 停止演奏
+          - `Esc`: 退出程序
+          
+          ### ⚠️ 注意事项
+          - 需要以管理员权限运行
+          - midi 文件夹需要与 exe 在同一目录
+        files: |
+          疯物之诗琴-${{ github.ref_name }}.zip
+          dist/疯物之诗琴.exe
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
