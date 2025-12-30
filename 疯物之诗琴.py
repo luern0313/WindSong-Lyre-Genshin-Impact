@@ -184,8 +184,27 @@ configure_attr = {
             "升高一个半音演奏",
             "同时演奏上一个半音和下一个半音"
         ]
+    },
+    "midi_directory": {
+        "set_tip": "设置MIDI文件所在目录（相对路径或绝对路径）",
+        "get_tip": "MIDI文件目录",
+        "default": "midi",
+        "mode": "string"
     }
 }
+
+# 默认 MIDI 目录
+DEFAULT_MIDI_DIR = "midi"
+
+
+def get_midi_directory():
+    """获取 MIDI 目录路径（线程安全）"""
+    with _configure_lock:
+        midi_dir = configure.get("midi_directory", DEFAULT_MIDI_DIR)
+    # 确保路径以分隔符结尾
+    if not midi_dir.endswith(os.sep) and not midi_dir.endswith("/"):
+        midi_dir = midi_dir + os.sep
+    return midi_dir
 
 
 def switch_instrument_mode(mode):
@@ -294,6 +313,8 @@ def read_configure():
                     print(conf["get_tip"] + "：" + str(configure[conf_key]))
                 elif conf["mode"] == "option":
                     print(conf["get_tip"] + "：" + conf["option"][configure[conf_key]])
+                elif conf["mode"] == "string":
+                    print(conf["get_tip"] + "：" + str(configure[conf_key]))
         print_split_line()
 
 
@@ -336,6 +357,14 @@ def set_configure():
                         break
                     else:
                         print("格式错误，请重新输入")
+                elif conf["mode"] == "string":
+                    print(conf["set_tip"] + f"（直接回车使用默认值：{conf['default']}）")
+                    value = input("请输入：")
+                    if value == "":
+                        configure[conf_key] = conf["default"]
+                    else:
+                        configure[conf_key] = value
+                    break
 
         except RuntimeError:
             print("ERR")
@@ -648,11 +677,22 @@ def main():
     
     while True:
         try:
-            file_list = os.listdir("midi/")
+            # 使用配置的 MIDI 目录
+            midi_dir = get_midi_directory()
+            if not os.path.exists(midi_dir):
+                print(f"MIDI目录不存在: {midi_dir}")
+                print("请在配置中设置正确的MIDI目录，或创建该目录")
+                break
+            
+            file_list = os.listdir(midi_dir)
+            if not file_list:
+                print(f"MIDI目录为空: {midi_dir}")
+                break
+            
             print("\n选择要打开的文件：")
             print("\n".join([str(i) + "、" + file_list[i] for i in range(len(file_list))]))
 
-            midi_file = mido.MidiFile("midi/" + file_list[int(input("请输入文件前数字序号："))])
+            midi_file = mido.MidiFile(midi_dir + file_list[int(input("请输入文件前数字序号："))])
             print_split_line()
             tracks = midi_file.tracks
             
