@@ -448,8 +448,11 @@ class PlayThread(QThread):
         read_configure()
 
     def stop_play(self):
+        """协作式停止播放，确保资源正确释放"""
         self.playFlag = False
         self._stop_event.set()  # 触发事件，中断等待
+        # 释放所有按下的键，防止按键卡住
+        release_all_keys()
 
     def set_file_path(self, file_path):
         self.file_path = file_path
@@ -557,6 +560,9 @@ class PlayThread(QThread):
                             press_key(vk[note_map[n]])
                         elif msg.type == "note_off":
                             release_key(vk[note_map[n]])
+        
+        # 播放结束后，确保释放所有按键
+        release_all_keys()
 
 
 def press_key(hex_key_code):
@@ -577,6 +583,16 @@ def release_key(hex_key_code):
     ii_.ki = KeyBdInput(0, hex_key_code, 0x0008 | 0x0002, 0, ctypes.pointer(extra))
     x = Input(ctypes.c_ulong(1), ii_)
     ctypes.windll.user32.SendInput(1, ctypes.pointer(x), ctypes.sizeof(x))
+
+
+def release_all_keys():
+    """释放所有当前按下的键，防止资源泄漏"""
+    global pressed_key
+    # 复制一份，避免在迭代时修改集合
+    keys_to_release = pressed_key.copy()
+    for hex_key_code in keys_to_release:
+        release_key(hex_key_code)
+    pressed_key.clear()
 
 
 def is_admin():
