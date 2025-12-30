@@ -20,10 +20,10 @@ from PyQt5.QtCore import QSize, Qt, QRect, pyqtSignal, QCoreApplication, QFileSy
 from PyQt5.QtGui import QKeySequence, QIcon, QFont, QFontDatabase
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QLabel, QListWidget, QApplication, 
                              QShortcut, QMessageBox, QLineEdit, QHBoxLayout, QSlider, 
-                             QPushButton, QFrame, QGraphicsDropShadowEffect)
+                             QPushButton, QFrame, QGraphicsDropShadowEffect, QComboBox)
 from system_hotkey import SystemHotkey, SystemRegisterError, InvalidKeyError, UnregisterError
 
-from 疯物之诗琴 import PlayThread, is_admin
+from 疯物之诗琴 import PlayThread, is_admin, switch_instrument_mode, configure, save_configure
 
 if hasattr(sys, 'frozen'):
     os.environ['PATH'] = sys._MEIPASS + ";" + os.environ['PATH']
@@ -214,6 +214,20 @@ class playWindow(QWidget):
         self.controlFrameLayout.setContentsMargins(20, 20, 20, 20)
         self.controlFrameLayout.setSpacing(15)
         
+        # 乐器模式选择
+        self.modeLayout = QHBoxLayout()
+        self.modeLabel = QLabel('🎸 乐器模式：')
+        self.modeLabel.setObjectName("modeLabel")
+        self.modeComboBox = QComboBox()
+        self.modeComboBox.addItem('🎻 诗琴模式 (21键，无黑键)')
+        self.modeComboBox.addItem('🎹 钢琴模式 (36键，有黑键)')
+        self.modeComboBox.setCurrentIndex(configure.get("instrument_mode", 0))
+        self.modeComboBox.setMinimumHeight(35)
+        self.modeComboBox.setCursor(Qt.PointingHandCursor)
+        self.modeComboBox.currentIndexChanged.connect(self.on_mode_changed)
+        self.modeLayout.addWidget(self.modeLabel)
+        self.modeLayout.addWidget(self.modeComboBox, 1)
+        
         # 按钮行
         self.controlLayout = QHBoxLayout()
         self.controlLayout.setSpacing(20)
@@ -264,6 +278,7 @@ class playWindow(QWidget):
         self.progressLayout.addLayout(self.timeLayout)
         self.progressLayout.addWidget(self.progressSlider)
         
+        self.controlFrameLayout.addLayout(self.modeLayout)
         self.controlFrameLayout.addLayout(self.controlLayout)
         self.controlFrameLayout.addLayout(self.progressLayout)
         
@@ -343,6 +358,27 @@ class playWindow(QWidget):
         self.stop_play_thread()
         self.progressSlider.setValue(0)
         self.currentTimeLabel.setText('00:00')
+    
+    # 乐器模式切换
+    def on_mode_changed(self, index):
+        # 如果正在播放，先停止
+        if self.playThread.isRunning():
+            self.stop_play_thread()
+        
+        # 切换模式
+        switch_instrument_mode(index)
+        configure["instrument_mode"] = index
+        save_configure()
+        
+        # 更新状态显示
+        mode_names = ['诗琴模式 (21键，无黑键)', '钢琴模式 (36键，有黑键)']
+        self.playStatus.setText(f'🔄 已切换到{mode_names[index]}')
+        
+        # 显示模式说明
+        if index == 0:
+            self.msgLabel.setText('🎻 诗琴模式：21键白键\n低音(Z-M) 中音(A-J) 高音(Q-U)\n黑键将用邻近白键代替')
+        else:
+            self.msgLabel.setText('🎹 钢琴模式：36键含黑键\n支持完整半音阶演奏\n适合非C调曲目')
     
     # 暂停播放
     def pause_play(self):

@@ -9,19 +9,62 @@ import os
 import sys
 from PyQt5.QtCore import QThread, pyqtSignal
 
-# 游戏键盘映射
-key = ["z", "x", "c", "v", "b", "n", "m",
-       "a", "s", "d", "f", "g", "h", "j",
-       "q", "w", "e", "r", "t", "y", "u"]
+# ==================== 诗琴模式 (21键，无黑键) ====================
+# 键位映射：低音(Z-M) 中音(A-J) 高音(Q-U)
+key_lyre = ["z", "x", "c", "v", "b", "n", "m",
+            "a", "s", "d", "f", "g", "h", "j",
+            "q", "w", "e", "r", "t", "y", "u"]
 
-vk = {"z": 0x2c, "x": 0x2d, "c": 0x2e, "v": 0x2f, "b": 0x30, "n": 0x31, "m": 0x32,
-      "a": 0x1e, "s": 0x1f, "d": 0x20, "f": 0x21, "g": 0x22, "h": 0x23, "j": 0x24,
-      "q": 0x10, "w": 0x11, "e": 0x12, "r": 0x13, "t": 0x14, "y": 0x15, "u": 0x16}
+vk_lyre = {"z": 0x2c, "x": 0x2d, "c": 0x2e, "v": 0x2f, "b": 0x30, "n": 0x31, "m": 0x32,
+           "a": 0x1e, "s": 0x1f, "d": 0x20, "f": 0x21, "g": 0x22, "h": 0x23, "j": 0x24,
+           "q": 0x10, "w": 0x11, "e": 0x12, "r": 0x13, "t": 0x14, "y": 0x15, "u": 0x16}
 
-# C大调音阶的MIDI值（相对值）
-note = [12, 14, 16, 17, 19, 21, 23,
-        24, 26, 28, 29, 31, 33, 35,
-        36, 38, 40, 41, 43, 45, 47]
+# 诗琴模式音符 (只有白键，C大调音阶)
+note_lyre = [12, 14, 16, 17, 19, 21, 23,   # 低音 C D E F G A B
+             24, 26, 28, 29, 31, 33, 35,   # 中音 C D E F G A B
+             36, 38, 40, 41, 43, 45, 47]   # 高音 C D E F G A B
+
+# ==================== 钢琴模式 (36键，有黑键) ====================
+# 白键：低音(.,/IOP[) 中音(ZXCVBNM) 高音(QWERTYU)
+# 黑键：低音(L;90-) 中音(SDGHJ) 高音(23567)
+key_piano = [
+    # 低音区 (C3-B3) - 白键 + 黑键
+    ",", "l", ".", ";", "/", "i", "9", "o", "0", "p", "-", "[",
+    # 中音区 (C4-B4) - 白键 + 黑键  
+    "z", "s", "x", "d", "c", "v", "g", "b", "h", "n", "j", "m",
+    # 高音区 (C5-B5) - 白键 + 黑键
+    "q", "2", "w", "3", "e", "r", "5", "t", "6", "y", "7", "u"
+]
+
+vk_piano = {
+    # 低音区白键
+    ",": 0x33, ".": 0x34, "/": 0x35, "i": 0x17, "o": 0x18, "p": 0x19, "[": 0x1a,
+    # 低音区黑键
+    "l": 0x26, ";": 0x27, "9": 0x0a, "0": 0x0b, "-": 0x0c,
+    # 中音区白键
+    "z": 0x2c, "x": 0x2d, "c": 0x2e, "v": 0x2f, "b": 0x30, "n": 0x31, "m": 0x32,
+    # 中音区黑键
+    "s": 0x1f, "d": 0x20, "g": 0x22, "h": 0x23, "j": 0x24,
+    # 高音区白键
+    "q": 0x10, "w": 0x11, "e": 0x12, "r": 0x13, "t": 0x14, "y": 0x15, "u": 0x16,
+    # 高音区黑键
+    "2": 0x03, "3": 0x04, "5": 0x06, "6": 0x07, "7": 0x08
+}
+
+# 钢琴模式音符 (包含所有半音，完整的12音阶)
+note_piano = [
+    # 低音区 C3-B3 (所有12个半音)
+    12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
+    # 中音区 C4-B4 (所有12个半音)
+    24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35,
+    # 高音区 C5-B5 (所有12个半音)
+    36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47
+]
+
+# ==================== 当前使用的映射 (默认诗琴模式) ====================
+key = key_lyre.copy()
+vk = vk_lyre.copy()
+note = note_lyre.copy()
 
 pressed_key = set()
 note_map, configure = None, {}
@@ -52,6 +95,16 @@ KEY_ROOT_OFFSET = {
 }
 
 configure_attr = {
+    "instrument_mode": {
+        "set_tip": "选择乐器模式",
+        "get_tip": "乐器模式",
+        "default": 0,
+        "mode": "option",
+        "option": [
+            "诗琴模式 (21键，无黑键)",
+            "钢琴模式 (36键，有黑键)"
+        ]
+    },
     "lowest_pitch_name": {
         "set_tip": "游戏仅支持演奏三个八度，请设定最低八度的音名（输入C后的数字，如输入4则演奏C4-B6，直接回车则程序按照不同乐谱自动判断）",
         "get_tip": "最低八度的音名",
@@ -59,7 +112,7 @@ configure_attr = {
         "mode": "int"
     },
     "auto_transpose": {
-        "set_tip": "是否自动将其他调转换为C调",
+        "set_tip": "是否自动将其他调转换为C调（钢琴模式下建议关闭）",
         "get_tip": "自动转调到C调",
         "default": 1,
         "mode": "option",
@@ -129,6 +182,32 @@ configure_attr = {
 }
 
 
+def switch_instrument_mode(mode):
+    """切换乐器模式
+    mode: 0 = 诗琴模式 (21键，无黑键)
+          1 = 钢琴模式 (36键，有黑键)
+    """
+    global key, vk, note
+    
+    if mode == 0:
+        key = key_lyre.copy()
+        vk = vk_lyre.copy()
+        note = note_lyre.copy()
+        print("已切换到诗琴模式 (21键，无黑键)")
+    elif mode == 1:
+        key = key_piano.copy()
+        vk = vk_piano.copy()
+        note = note_piano.copy()
+        print("已切换到钢琴模式 (36键，有黑键)")
+    
+    return mode
+
+
+def is_piano_mode():
+    """检查当前是否为钢琴模式"""
+    return configure.get("instrument_mode", 0) == 1
+
+
 def detect_key_signature(tracks):
     """自动检测MIDI文件的调式"""
     # 统计每个音符类别的出现次数
@@ -193,6 +272,10 @@ def read_configure():
         print("配置文件不存在")
         set_configure()
         save_configure()
+
+    # 根据配置切换乐器模式
+    instrument_mode = configure.get("instrument_mode", 0)
+    switch_instrument_mode(instrument_mode)
 
     print_split_line()
     print("当前配置：")
@@ -275,7 +358,12 @@ def get_note(n):
         if configure["above_limit"] == 1:
             break
 
-    # 处理黑键
+    # 钢琴模式：直接支持黑键，无需转换
+    if is_piano_mode():
+        n_list.append(n)
+        return n_list
+    
+    # 诗琴模式：处理黑键（用邻近白键代替）
     if note_map_keys[0] <= n <= note_map_keys[6] and n not in note_map_keys:
         if configure["black_key_1"] == 1:
             n -= 1
@@ -351,6 +439,9 @@ class PlayThread(QThread):
     progressSignal = pyqtSignal(float)  # 添加进度信号
     file_path = None
     start_time = 0  # 添加起始时间属性
+    
+    # 可中断sleep的检查间隔（秒）
+    SLEEP_CHECK_INTERVAL = 0.01  # 10ms，响应更快
 
     def __init__(self, parent=None):
         super(PlayThread, self).__init__(parent)
@@ -365,6 +456,26 @@ class PlayThread(QThread):
     
     def set_start_time(self, start_time):
         self.start_time = start_time
+    
+    def interruptible_sleep(self, duration):
+        """可中断的sleep，每隔一小段时间检查playFlag
+        
+        Args:
+            duration: 需要等待的总时长（秒）
+            
+        Returns:
+            bool: True表示完整等待完成，False表示被中断
+        """
+        if duration <= 0:
+            return self.playFlag
+        
+        elapsed = 0
+        while elapsed < duration and self.playFlag:
+            sleep_time = min(self.SLEEP_CHECK_INTERVAL, duration - elapsed)
+            time.sleep(sleep_time)
+            elapsed += sleep_time
+        
+        return self.playFlag
 
     def run(self):
         self.playFlag = True
@@ -387,7 +498,11 @@ class PlayThread(QThread):
         # 创建C调的音符映射
         note_map = {note[i] + base_note * 12: key[i] for i in range(len(note))}
         
-        time.sleep(1)
+        # 使用可中断的sleep等待1秒
+        if not self.interruptible_sleep(1):
+            self.playSignal.emit('停止演奏！')
+            print('停止演奏！')
+            return
         
         # 如果设置了起始时间，跳过前面的消息
         elapsed_time = 0
@@ -421,8 +536,11 @@ class PlayThread(QThread):
                 print('停止演奏！')
                 break
             
-            # 等待消息的时间
-            time.sleep(msg.time)
+            # 使用可中断的sleep等待消息的时间
+            if not self.interruptible_sleep(msg.time):
+                self.playSignal.emit('停止演奏！')
+                print('停止演奏！')
+                break
             
             # 发送当前播放进度
             current_play_time = time.time() - play_start_time
